@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "replicaxlite"
+version = "1.0.0"
+description = "ReplicaXLite - A finite element toolkit for creating, analyzing and monitoring 3D structural models"
+readme = "README.md"
+authors = [{name = "Vachan Vanian", email = "vachanvanian@outlook.com"}]
+license = {text = "GPL-3.0"}
+requires-python = "==3.11.9"
+keywords = ["finite-element", "structural-analysis", "engineering", "opensees", "3d-modeling"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering"
+]
+dependencies = [
+    "openseespy==3.5.1.12",
+    "openseespywin==3.5.1.12; sys_platform == 'win32'",
+    "opstool==1.0.19",
+    "numpy==1.26.4",
+    "matplotlib==3.9.2",
+    "PySide6==6.7.2",
+    "pyvista==0.44.1",
+    "pyvistaqt==0.11.1",
+    "ezdxf==1.4.0",
+    "tqdm==4.67.1",
+    "scipy==1.14.1",
+    "vtk==9.2.6",
+]
+
+# Console script entry points
+[project.scripts]
+replicaxlite = "replicaxlite.ReplicaXLiteApp:main"
+replicax = "replicaxlite.ReplicaXLiteApp:main"
+
+# Include data files (icons, images, etc.)
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+replicaxlite = [
+    "GUIs/icons/**/*.png",
+    "GUIs/icons/**/*.jpg", 
+    "GUIs/icons/**/*.svg",
+    "GUIs/icons/**/*.ico",
+    "UtilityFiles/**/*.json"
+]
+
+[tool.setuptools.packages.find]
