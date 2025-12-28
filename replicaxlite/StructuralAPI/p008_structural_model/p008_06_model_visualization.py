@@ -215,25 +215,31 @@ class ModelVisualization:
         return fig
 
 
-    ### UNDER REVIEW
     def visualize_geometry(self, 
-                        show_nodes: bool = True, 
-                        show_element_ids: bool = True, 
-                        node_size: float = 5.0, 
-                        line_width: float = 2.0):
+                        show_node_ids: bool = False, 
+                        show_element_ids: bool = False, 
+                        node_size: float = 1.0, node_font_size: int = 10,
+                        line_width: float = 2.0, line_font_size: int = 10,
+                        window_title: str = "Structural Geometry Visualization"):
         """
         Visualize the geometric model using PyVista without modifying OpenSees model.
         
         Parameters:
         -----------
-        show_nodes : bool
-            Whether to show node points
+        show_node_ids : bool
+            Whether to show node IDs
         show_element_ids : bool
             Whether to show element IDs
         node_size : float
             Size of node points in visualization
+        node_font_size : int
+            Font size for node labels
         line_width : float
             Width of element lines
+        line_font_size : int
+            Font size for element ID labels
+        window_title : str
+            Title for the plotter window (default: "Structural Geometry Visualization")
         
         Returns:
         --------
@@ -247,26 +253,25 @@ class ModelVisualization:
         # Collect element connections
         elements = self.parent.geometry.elements
         
-        # Create PyVista plotter
-        plotter = pv.Plotter()
+        # Create PyVista plotter with window title
+        plotter = pv.Plotter(title="ReplicaXLite: " + window_title)
         
         # Plot nodes
-        if show_nodes:
-            cloud = pv.PolyData(node_coords)
-            plotter.add_mesh(cloud, 
-                            color='red', 
-                            point_size=node_size, 
-                            render_points_as_spheres=True)
-            
-            # Add node labels if needed
-            if show_nodes:
-                for node in nodes.values():
-                    plotter.add_point_labels(
-                        [node.coords], 
-                        [str(node.tag)], 
+        cloud = pv.PolyData(node_coords)
+        plotter.add_mesh(cloud, 
+                        color='red', 
                         point_size=node_size, 
-                        font_size=10
-                    )
+                        render_points_as_spheres=True)
+            
+        # Add node labels if needed
+        if show_node_ids:
+            for node in nodes.values():
+                plotter.add_point_labels(
+                    [node.coords], 
+                    [str(node.tag)], 
+                    point_size=node_size, 
+                    font_size=node_font_size
+                )
         
         # Plot elements as lines
         for element in elements.values():
@@ -283,6 +288,8 @@ class ModelVisualization:
                 'beam_x': 'green',
                 'beam_y': 'green',
                 'wall': 'orange',
+                'slab': 'cyan',
+                'infill': 'tan',
                 'default': 'blue'
             }
             color = color_map.get(element.structural_type, color_map['default'])
@@ -297,13 +304,11 @@ class ModelVisualization:
                 plotter.add_point_labels(
                     [midpoint], 
                     [str(element.tag)], 
-                    font_size=10
+                    font_size=line_font_size
                 )
         
         # Configure view
         plotter.show_axes()
         plotter.set_background('white')
         
-        
         return plotter
-

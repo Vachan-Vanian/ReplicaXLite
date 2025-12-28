@@ -126,6 +126,8 @@ class ReplicaXProjectManager:
 
             # Initialize project
             self._initialize_project(project_folder)
+            self._save_project_data()
+
             
             self.dialog.show_info("Project Created", f"Project '{project_name}' created successfully!")
             self.status_bar.update_message(f"Project '{project_name}' created successfully!", 5000)

@@ -23,6 +23,7 @@ import openseespy.opensees as ops
 import opstool as opst
 import numpy as np
 from tqdm import tqdm
+from .z00_external_eigen_data import save_eigen_data, get_eigen_data
 
 
 class ModelAnalysis:
@@ -33,57 +34,14 @@ class ModelAnalysis:
         self._next_pattern_id = 1000  # Starting ID for dynamic patterns
         self._current_time = 0.0     # Track analysis time
         self._gravity_applied = False  # Track if gravity has been applied
+        self.analysis_wiped = True
+        self.previous_analysis = None
     
     def _prepare_model(self):
         """Ensure model is built before analysis"""
         if not self.parent._model_built:
             self.parent._log("Building model before analysis...")
             self.parent.build_model()
-
-    def _check_mass_defined(self):
-        """
-        Check if mass is properly defined in the model.
-        
-        Returns:
-        --------
-        bool
-            True if mass is defined in the model, False otherwise
-        """
-        try:
-            # Configure system for matrix extraction
-            ops.wipeAnalysis()
-            ops.system('FullGeneral')
-            ops.numberer('Plain')
-            ops.constraints('Transformation')
-            ops.algorithm('Linear')
-            ops.integrator('GimmeMCK', 1.0, 0.0, 0.0)  # Request only mass matrix
-            ops.analysis('Transient')
-            
-            # Perform dummy analysis to generate matrices
-            ops.analyze(1, 0.0)
-            
-            # Get mass matrix
-            mass_matrix = ops.printA('-ret')
-            
-            if not mass_matrix or len(mass_matrix) == 0:
-                self.parent._log("WARNING: No mass matrix could be extracted!", level="warning")
-                return False
-            
-            # Check if there's any non-zero mass
-            has_mass = any(abs(val) > 1e-10 for val in mass_matrix)
-            
-            if not has_mass:
-                self.parent._log("WARNING: No mass detected in model!", level="warning")
-                return False
-                
-            return True
-            
-        except Exception as e:
-            self.parent._log(f"Error checking mass matrix: {str(e)}", level="warning")
-            return False
-        finally:
-            # Restore analysis configuration
-            ops.wipeAnalysis()
 
     def _create_smart_analyzer(self, analysis_type, smart_analyze_params=None):
         """
@@ -140,7 +98,7 @@ class ModelAnalysis:
 
     def prepare_next_analysis_stage(self, set_time_0=True, keep_loads=False, remove_recorders=True, 
                                     remove_time_series=None, remove_pattern=None,
-                                    clear_damping=False):
+                                    clear_damping=False, wipe_analysis=True):
         if set_time_0:
             ops.setTime(0.0)
         if keep_loads:
@@ -155,10 +113,13 @@ class ModelAnalysis:
                 ops.remove('timeSeries', ts_tag)
         if clear_damping:
             ops.rayleigh(0.0, 0.0, 0.0, 0.0)
-            
-        ops.wipeAnalysis()    
+        if wipe_analysis:
+            ops.wipeAnalysis()
+            self.analysis_wiped=True   
+        else:
+            self.analysis_wiped=False   
     
-    def run_modal_analysis(self, num_modes=3, odb_tag="modal", solver="-genBandArpack"):
+    def run_modal_analysis(self, num_modes=3, odb_tag="modal", solver="-genBandArpack", analysis_params=None, next_stage={}):
         """
         Run a modal (eigenvalue) analysis.
         
@@ -178,33 +139,53 @@ class ModelAnalysis:
         """
         self._prepare_model()
         
-        # Check if mass is defined
-        self._check_mass_defined()
-        
-        # Configure eigenvalue analysis
-        ops.wipeAnalysis()
-        ops.system("BandGeneral")
-        ops.numberer("RCM")
-        ops.constraints("Transformation")
+        if self.analysis_wiped:
+            default_params = {
+                "system": "BandGeneral",
+                "numberer": "RCM",
+                "constraints": "Transformation",
+                
+            }
+            # Use provided parameters or defaults
+            params = analysis_params or default_params
+            
+            # Configure eigenvalue analysis
+            ops.system(params.get("system", default_params["system"]))
+            ops.numberer(params.get("numberer", default_params["numberer"]))
+            ops.constraints(params.get("constraints", default_params["constraints"]))
         
         # Compute eigenvalues
         self.parent._log(f"Computing {num_modes} eigenvalues using {solver}...")
         try:
-            opst.post.save_eigen_data(odb_tag=odb_tag, mode_tag=num_modes, solver=solver)
+            save_eigen_data(odb_tag=odb_tag, mode_tag=num_modes, solver=solver)
         except Exception as e:
             self.parent._log(f"Modal analysis failed: {str(e)}", level="error")
             return None
         
-        model_props, eigen_vectors = opst.post.get_eigen_data(odb_tag=odb_tag)
+        model_props, eigen_vectors = get_eigen_data(odb_tag=odb_tag)
         model_props_df = model_props.to_pandas()
         eigen_values = model_props_df["eigenLambda"].to_list()
         omega =model_props_df["eigenOmega"].to_list()
         period = model_props_df["eigenPeriod"].to_list()
         frequency = model_props_df["eigenFrequency"].to_list()
         
+        next_stage_params = {
+            "set_time_0": False,
+            "keep_loads": False,
+            "remove_recorders": False,
+            "remove_time_series": None,
+            "remove_pattern": None,
+            "clear_damping": False,
+            "wipe_analysis": False
+        }
+        if next_stage:
+            next_stage_params.update(next_stage)
+        self.prepare_next_analysis_stage(**next_stage_params)
         
         self.parent._log(f"Modal analysis completed with {num_modes} modes")
         self.parent._log(f"Periods: {period}")
+
+        self.previous_analysis='modal'
         
         return {
             "eigen_values": eigen_values,
@@ -216,7 +197,7 @@ class ModelAnalysis:
     
     def run_gravity_analysis(self, load_pattern_tag, n_steps=10, tol=1.0e-5, max_iter=25, 
                            output_odb_tag="gravity", show_progress=True, 
-                           analysis_params=None):
+                           analysis_params=None, next_stage={}, odb_params={}):
         """
         Run gravity analysis on the model.
         
@@ -236,15 +217,16 @@ class ModelAnalysis:
             Whether to show progress bar
         analysis_params : dict, optional
             Custom analysis parameters dictionary
-            
+        next_stage : dict, optional
+            Parameters for the next analysis stage preparation
+        odb_params : dict, optional
+            Additional parameters for output database creation
         Returns:
         --------
         object
             Analysis output database object
         """
         self._prepare_model()
-        #Clean previous analysis
-        ops.wipeAnalysis()
 
         # Verify gravity loads exist in the specified pattern
         if load_pattern_tag not in self.parent.loading.load_patterns:
@@ -254,43 +236,44 @@ class ModelAnalysis:
         
         self.parent.user_update_load_pattern(pattern_tag=load_pattern_tag)
 
-        # Default analysis parameters
-        default_params = {
-            "system": "BandGeneral",
-            "constraints": "Transformation",
-            "numberer": "RCM",
-            "test_type": "NormDispIncr",
-            "test_tolerance": tol,
-            "test_iterations": max_iter,
-            "test_flag": 0,
-            "algorithm": "Newton",
-            "integrator": "LoadControl",
-            "integrator_arg": 1.0/n_steps,
-            "analysis": "Static"
-        }
-        
-        # Use provided parameters or defaults
-        params = analysis_params or default_params
-        
-        # Configure analysis
-        ops.system(params.get("system", default_params["system"]))
-        ops.constraints(params.get("constraints", default_params["constraints"]))
-        ops.numberer(params.get("numberer", default_params["numberer"]))
-        ops.test(
-            params.get("test_type", default_params["test_type"]),
-            params.get("test_tolerance", default_params["test_tolerance"]),
-            params.get("test_iterations", default_params["test_iterations"]),
-            params.get("test_flag", default_params["test_flag"])
-        )
-        ops.algorithm(params.get("algorithm", default_params["algorithm"]))
-        ops.integrator(
-            params.get("integrator", default_params["integrator"]), 
-            params.get("integrator_arg", default_params["integrator_arg"])
-        )
-        ops.analysis(params.get("analysis", default_params["analysis"]))
+        if self.analysis_wiped==True:
+            # Default analysis parameters
+            default_params = {
+                "system": "BandGeneral",
+                "constraints": "Transformation",
+                "numberer": "RCM",
+                "test_type": "NormDispIncr",
+                "test_tolerance": tol,
+                "test_iterations": max_iter,
+                "test_flag": 0,
+                "algorithm": "Newton",
+                "integrator": "LoadControl",
+                "integrator_arg": 1.0/n_steps,
+                "analysis": "Static"
+            }
+            
+            # Use provided parameters or defaults
+            params = analysis_params or default_params
+            
+            # Configure analysis
+            ops.system(params.get("system", default_params["system"]))
+            ops.constraints(params.get("constraints", default_params["constraints"]))
+            ops.numberer(params.get("numberer", default_params["numberer"]))
+            ops.test(
+                params.get("test_type", default_params["test_type"]),
+                params.get("test_tolerance", default_params["test_tolerance"]),
+                params.get("test_iterations", default_params["test_iterations"]),
+                params.get("test_flag", default_params["test_flag"])
+            )
+            ops.algorithm(params.get("algorithm", default_params["algorithm"]))
+            ops.integrator(
+                params.get("integrator", default_params["integrator"]), 
+                params.get("integrator_arg", default_params["integrator_arg"])
+            )
+            ops.analysis(params.get("analysis", default_params["analysis"]))
         
         # Create output database
-        odb = opst.post.CreateODB(odb_tag=output_odb_tag)
+        odb = opst.post.CreateODB(odb_tag=output_odb_tag, **odb_params)
         
         # Run analysis
         if show_progress:
@@ -304,21 +287,26 @@ class ModelAnalysis:
                 self.parent._log("Gravity analysis failed", level="warning")
                 break
             odb.fetch_response_step()
-        odb.save_response()
+        odb.save_response(zlib=True)
         
         self._gravity_applied = True
         
-        self.prepare_next_analysis_stage(
-            set_time_0=True,
-            keep_loads=True,
-            remove_recorders=True
-        )
+        next_stage_params = {
+            "set_time_0": True,
+            "keep_loads": True,
+            "remove_recorders": True,
+            "wipe_analysis": True
+        }
+        if next_stage:
+            next_stage_params.update(next_stage)
+        self.prepare_next_analysis_stage(**next_stage_params)
+        self.previous_analysis='static'
         
         self.parent._log(f"Gravity analysis completed with {n_steps} steps")
         return odb
 
     def run_static_analysis(self, load_pattern_tag,  n_steps=10, output_odb_tag="static", 
-                         show_progress=True, analysis_params=None):
+                         show_progress=True, analysis_params=None, next_stage=None, odb_params={}):
         """
         Run a static analysis, building the model first if needed.
         
@@ -334,14 +322,17 @@ class ModelAnalysis:
             Whether to show progress bar
         analysis_params : dict, optional
             Dictionary of analysis parameters
+        next_stage : dict, optional
+            Parameters for the next analysis stage preparation
+        odb_params : dict, optional
+            Additional parameters for output database creation
         Returns:
         --------
         object
             Analysis output database object
         """
         self._prepare_model()
-        # Clean previous analysis
-        ops.wipeAnalysis()
+
         # Verify loads exist in the specified pattern
         if load_pattern_tag not in self.parent.loading.load_patterns:
             self.parent._log(f"Error: Load pattern {load_pattern_tag} not found for static analysis", 
@@ -368,24 +359,26 @@ class ModelAnalysis:
         params = analysis_params or default_params
         
         # Configure analysis
-        ops.system(params.get("system", default_params["system"]))
-        ops.constraints(params.get("constraints", default_params["constraints"]))
-        ops.numberer(params.get("numberer", default_params["numberer"]))
-        ops.test(
-            params.get("test_type", default_params["test_type"]),
-            params.get("test_tolerance", default_params["test_tolerance"]),
-            params.get("test_iterations", default_params["test_iterations"]),
-            params.get("test_flag", default_params["test_flag"])
-        )
-        ops.algorithm(params.get("algorithm", default_params["algorithm"]))
-        ops.integrator(
-            params.get("integrator", default_params["integrator"]), 
-            params.get("integrator_arg", default_params["integrator_arg"])
-        )
-        ops.analysis(params.get("analysis", default_params["analysis"]))
+
+        if self.analysis_wiped:
+            ops.system(params.get("system", default_params["system"]))
+            ops.constraints(params.get("constraints", default_params["constraints"]))
+            ops.numberer(params.get("numberer", default_params["numberer"]))
+            ops.test(
+                params.get("test_type", default_params["test_type"]),
+                params.get("test_tolerance", default_params["test_tolerance"]),
+                params.get("test_iterations", default_params["test_iterations"]),
+                params.get("test_flag", default_params["test_flag"])
+            )
+            ops.algorithm(params.get("algorithm", default_params["algorithm"]))
+            ops.integrator(
+                params.get("integrator", default_params["integrator"]), 
+                params.get("integrator_arg", default_params["integrator_arg"])
+            )
+            ops.analysis(params.get("analysis", default_params["analysis"]))
         
         # Create output database
-        odb = opst.post.CreateODB(odb_tag=output_odb_tag)
+        odb = opst.post.CreateODB(odb_tag=output_odb_tag, **odb_params)
         
         # Run analysis
         if show_progress:
@@ -399,13 +392,18 @@ class ModelAnalysis:
                 self.parent._log("Static analysis failed", level="warning")
                 break
             odb.fetch_response_step()  # fetch the response on the current step
-        odb.save_response()
+        odb.save_response(zlib=True)
 
-        self.prepare_next_analysis_stage(
-            set_time_0=True,
-            keep_loads=False,
-            remove_recorders=True
-        )
+        next_stage_params = {
+            "set_time_0": True,
+            "keep_loads": False,
+            "remove_recorders": True,
+            "wipe_analysis": True
+        }
+        if next_stage:
+            next_stage_params.update(next_stage)
+        self.prepare_next_analysis_stage(**next_stage_params)
+        self.previous_analysis='static'
         
         self.parent._log(f"Static analysis completed with {n_steps} steps")
         return odb
@@ -414,7 +412,10 @@ class ModelAnalysis:
                         target_protocol, max_step,
                         output_odb_tag="pushover",
                         analysis_params=None,
-                        smart_analyze_params=None):
+                        smart_analyze_params=None,
+                        next_stage=None, 
+                        use_disp_limit=False, print_step=False,
+                        odb_params={}):
         """
         Run a displacement-controlled pushover analysis using SmartAnalyze.
         
@@ -436,7 +437,14 @@ class ModelAnalysis:
             System-level analysis parameters
         smart_analyze_params : dict, optional
             Custom parameters for SmartAnalyze configuration
-            
+        next_stage : dict, optional
+            Parameters for the next analysis stage preparation
+        use_disp_limit : bool
+            Whether to stop when target displacement is reached (default: False)
+        print_step : bool
+            Print current displacement at each step (default: False)
+        odb_params : dict, optional
+            Additional parameters for output database creation            
         Returns:
         --------
         object
@@ -453,7 +461,7 @@ class ModelAnalysis:
                 
         # Default analysis parameters
         default_params = {
-            "system": "UmfPack",  # More robust sparse solver
+            "system": "BandGeneral",  # More robust sparse solver
             "constraints": "Transformation",
             "numberer": "RCM"
         }
@@ -463,27 +471,32 @@ class ModelAnalysis:
         if analysis_params:
             params.update(analysis_params)
         
-        # Configure system components
-        ops.wipeAnalysis()
-        ops.system(params.get("system", default_params["system"]))
-        ops.constraints(params.get("constraints", default_params["constraints"]))
-        ops.numberer(params.get("numberer", default_params["numberer"]))
+        if self.analysis_wiped==True:
+            # Configure system components
+            ops.system(params.get("system", default_params["system"]))
+            ops.constraints(params.get("constraints", default_params["constraints"]))
+            ops.numberer(params.get("numberer", default_params["numberer"]))
         
         # Create output database
-        odb = opst.post.CreateODB(odb_tag=output_odb_tag)
+        odb = opst.post.CreateODB(odb_tag=output_odb_tag, **odb_params)
         
         # Create SmartAnalyze for Static analysis
         smart_analyze = self._create_smart_analyzer("Static", smart_analyze_params)
 
-        segments = smart_analyze.static_split(target_protocol, maxStep=max_step)      
-        
+        segments = smart_analyze.static_split(target_protocol, maxStep=max_step)
         # Run the analysis using SmartAnalyze
         step_count = 0
         
         for i, seg in enumerate(segments):
             # Run static analysis step with SmartAnalyze
             result = smart_analyze.StaticAnalyze(control_node, control_dof, seg)
+            currentDisp = ops.nodeDisp(control_node, control_dof)
             
+            if print_step:
+                print("Current Disp:", currentDisp)
+            if use_disp_limit==True and currentDisp>=target_protocol[0]:
+                break
+
             if result < 0:
                 self.parent._log(f"Pushover analysis failed at step {i+1}", level="warning")
                 break
@@ -493,16 +506,21 @@ class ModelAnalysis:
         
                 
         # Save response data
-        odb.save_response()
+        odb.save_response(zlib=True)
     
         # Clean up
         smart_analyze.close()
 
-        self.prepare_next_analysis_stage(
-            set_time_0=True,
-            keep_loads=False,
-            remove_recorders=True
-        )
+        next_stage_params = {
+            "set_time_0": True,
+            "keep_loads": False,
+            "remove_recorders": True,
+            "wipe_analysis": True
+        }
+        if next_stage:
+            next_stage_params.update(next_stage)
+        self.prepare_next_analysis_stage(**next_stage_params)
+        self.previous_analysis='static'
 
         # Log analysis completion
         self.parent._log(f"Pushover analysis completed with {step_count} steps")
@@ -515,7 +533,9 @@ class ModelAnalysis:
                                 scale_factor=1.0, analysis_params=None,
                                 pattern_type="UniformExcitation",
                                 smart_analyze_params=None,
-                                support_nodes=None):
+                                support_nodes=None,
+                                next_stage=None,
+                                odb_params={}):
         """
         Run a time history analysis with support for acceleration, velocity, and displacement inputs.
         
@@ -550,7 +570,10 @@ class ModelAnalysis:
             
             Example:
             support_nodes = [1, 2, 5, 10]  # Motion applied to nodes 1, 2, 5, 10 in specified direction
-            
+        next_stage : dict, optional
+            Parameters for the next analysis stage preparation
+        odb_params : dict, optional
+            Additional parameters for output database creation            
         Returns:
         --------
         object
@@ -558,9 +581,6 @@ class ModelAnalysis:
         """
         # Prepare model
         self._prepare_model()
-
-        # Clean and remove previous analysis
-        ops.wipeAnalysis()
         
         # Generate tags
         pattern_tag = self._next_pattern_id
@@ -738,27 +758,28 @@ class ModelAnalysis:
         # Use provided parameters or defaults
         params = analysis_params or default_params
         
-        # Setup dynamic analysis
-        ops.system(params.get("system", default_params["system"]))
-        ops.constraints(params.get("constraints", default_params["constraints"]))
-        ops.numberer(params.get("numberer", default_params["numberer"]))
-        
-        # Handle different integrators
-        integrator = params.get("integrator", default_params["integrator"])
-        if integrator == "Newmark":
-            # Default Newmark parameters
-            gamma, beta = 0.5, 0.25
-            if "integrator_args" in params:
-                if len(params["integrator_args"]) >= 2:
-                    gamma, beta = params["integrator_args"][0], params["integrator_args"][1]
-            ops.integrator(integrator, gamma, beta)
-        elif "integrator_args" in params:
-            ops.integrator(integrator, *params["integrator_args"])
-        else:
-            ops.integrator(integrator)
+        if self.analysis_wiped==True:
+            # Setup dynamic analysis
+            ops.system(params.get("system", default_params["system"]))
+            ops.constraints(params.get("constraints", default_params["constraints"]))
+            ops.numberer(params.get("numberer", default_params["numberer"]))
+            
+            # Handle different integrators
+            integrator = params.get("integrator", default_params["integrator"])
+            if integrator == "Newmark":
+                # Default Newmark parameters
+                gamma, beta = 0.5, 0.25
+                if "integrator_args" in params:
+                    if len(params["integrator_args"]) >= 2:
+                        gamma, beta = params["integrator_args"][0], params["integrator_args"][1]
+                ops.integrator(integrator, gamma, beta)
+            elif "integrator_args" in params:
+                ops.integrator(integrator, *params["integrator_args"])
+            else:
+                ops.integrator(integrator)
         
         # Create output database
-        odb = opst.post.CreateODB(odb_tag=odb_tag)
+        odb = opst.post.CreateODB(odb_tag=odb_tag, **odb_params)
         
         # Initialize SmartAnalyze for transient analysis
         smart_analyze = self._create_smart_analyzer("Transient", smart_analyze_params)
@@ -787,15 +808,20 @@ class ModelAnalysis:
         # Clean up
         smart_analyze.close()
         
-        # Prepare for next analysis stage with targeted cleanup
-        self.prepare_next_analysis_stage(
-            set_time_0=True,
-            keep_loads=False,
-            remove_recorders=True,
-            remove_time_series=created_time_series,
-            remove_pattern=created_patterns,
-            clear_damping=True
-        )
+        # Prepare for next analysis stage with targeted cleanup       
+        next_stage_params = {
+            "set_time_0": True,
+            "keep_loads":False,
+            "remove_recorders":True,
+            "remove_time_series": created_time_series,
+            "remove_pattern": created_patterns,
+            "clear_damping": True,
+            "wipe_analysis": True
+        }
+        if next_stage:
+            next_stage_params.update(next_stage)
+        self.prepare_next_analysis_stage(**next_stage_params)
+        self.previous_analysis='dynamic'
         
         self.parent._log(f"Time history analysis completed with {success_steps} successful steps")
         self.parent._log(f"Current analysis time: {self._current_time}")
