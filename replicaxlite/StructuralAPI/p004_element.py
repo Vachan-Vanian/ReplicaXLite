@@ -39,20 +39,20 @@ class StructuralElement(Enum):
     TRUSS = "truss"
     GENERAL = "general"
 
-    BEAM_X = "beam_x",
-    BEAM_Y = "beam_y",
-    BEAM_XY = "beam_xy",
-    BEAM_BALCONY = "beam_balcony",
-    BEAM_BALCONY_X = "beam_balcony_x",
-    BEAM_BALCONY_Y = "beam_balcony_y",
-    BEAM_BALCONY_XY = "beam_balcony_xy",
-    BEAM_BASE = "beam_base",
-    BEAM_BASE_X = "beam_base_x",
-    BEAM_BASE_Y = "beam_base_y",
-    BEAM_BASE_XY = "beam_base_xy",
-    INFILL_X = "infill_x",
-    INFILL_BACKSLASH = "infill_backslash",
-    INFILL_FORWARD = "infill_forward",
+    BEAM_X = "beam_x"
+    BEAM_Y = "beam_y"
+    BEAM_XY = "beam_xy"
+    BEAM_BALCONY = "beam_balcony"
+    BEAM_BALCONY_X = "beam_balcony_x"
+    BEAM_BALCONY_Y = "beam_balcony_y"
+    BEAM_BALCONY_XY = "beam_balcony_xy"
+    BEAM_BASE = "beam_base"
+    BEAM_BASE_X = "beam_base_x"
+    BEAM_BASE_Y = "beam_base_y"
+    BEAM_BASE_XY = "beam_base_xy"
+    INFILL_X = "infill_x"
+    INFILL_BACKSLASH = "infill_backslash"
+    INFILL_FORWARD = "infill_forward"
     INFILL_X_AND_CROSS = "infill_x_and_cross"  
 
 

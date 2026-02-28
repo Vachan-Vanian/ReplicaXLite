@@ -35,7 +35,7 @@ class ModelGeometry:
         
         # Element organization
         self.element_groups = {
-            # Core element groups (these match StructuralElement enum values)
+            # Core element groups
             'column': set(),
             'beam': set(),
             'wall': set(),
@@ -43,7 +43,7 @@ class ModelGeometry:
             'truss': set(),
             'tree': set(),
             'infill': set(),
-            'other': set(),
+            'general': set(),
 
             # Predefined organizational groups
             'beam_x': set(),
