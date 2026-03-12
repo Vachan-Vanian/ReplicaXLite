@@ -22,20 +22,23 @@ ReplicaXLite is a comprehensive finite element toolkit built with Python. It pro
 
 ## Citation
 
-If you use ReplicaXLite in your research, please cite it using the following format:
+If you use ReplicaXLite in your research, please cite it using the following format (MDPI and ACS Style):
 
-> Vanian V. and Rousakis T., "ReplicaXLite: A finite element toolkit for creating, analyzing and monitoring 3D structural models," GitHub Repository, 2025, 
-https://github.com/Vachan-Vanian/ReplicaXLite.
+> Vanian, V.; Rousakis, T. ReplicaXLite: A Finite Element Toolkit for Creating, Analyzing and Monitoring 3D Structural Models. Buildings 2026, 16, 1131. https://doi.org/10.3390/buildings16061131 
 
 For BibTeX:
 ```bibtex
-@software{vanian2025_replicaxlite,
-  author       = {Vanian, Vachan and Rousakis, Theodoros},
-  title        = {{ReplicaXLite: A finite element toolkit for creating, analyzing and monitoring 3D structural models}},
-  year         = {2025},
-  publisher    = {GitHub},
-  journal      = {GitHub Repository},
-  url          = {https://github.com/Vachan-Vanian/ReplicaXLite}
+@Article{buildings16061131,
+AUTHOR = {Vanian, Vachan and Rousakis, Theodoros},
+TITLE = {ReplicaXLite: A Finite Element Toolkit for Creating, Analyzing and Monitoring 3D Structural Models},
+JOURNAL = {Buildings},
+VOLUME = {16},
+YEAR = {2026},
+NUMBER = {6},
+ARTICLE-NUMBER = {1131},
+URL = {https://www.mdpi.com/2075-5309/16/6/1131},
+ISSN = {2075-5309},
+DOI = {10.3390/buildings16061131}
 }
 ```
 
